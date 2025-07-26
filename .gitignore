@@ -1,0 +1,12 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Pytest cache
+.pytest_cache/
+
+# Database files
+bot.db
+
+# Environment variables
+.env
