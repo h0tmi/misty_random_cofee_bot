@@ -58,3 +58,63 @@ def get_confirm_delete() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отмена", callback_data="profile_menu")
     )
     return builder.as_markup()
+
+
+def get_admin_menu() -> InlineKeyboardMarkup:
+    """Админское меню"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin_users")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📊 Статистика мэтчинга", callback_data="admin_stats")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔄 Запустить мэтчинг", callback_data="admin_manual_matching")
+    )
+    return builder.as_markup()
+
+
+def get_users_list_keyboard(
+    users_count: int, page: int = 0, page_size: int = 10
+) -> InlineKeyboardMarkup:
+    """Клавиатура для списка пользователей с пагинацией"""
+    builder = InlineKeyboardBuilder()
+
+    # Кнопки навигации по страницам
+    total_pages = (users_count + page_size - 1) // page_size
+
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(
+                text="⬅️ Назад", callback_data=f"users_page_{page-1}"
+            ))
+
+        nav_buttons.append(InlineKeyboardButton(
+            text=f"{page+1}/{total_pages}", callback_data="current_page"
+        ))
+
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(
+                text="Вперед ➡️", callback_data=f"users_page_{page+1}"
+            ))
+
+        if nav_buttons:
+            builder.row(*nav_buttons)
+
+    # Кнопка возврата в админ меню
+    builder.row(
+        InlineKeyboardButton(text="⬅️ В админ меню", callback_data="admin_menu")
+    )
+
+    return builder.as_markup()
+
+
+def get_back_to_admin() -> InlineKeyboardMarkup:
+    """Кнопка возврата в админ меню"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⬅️ В админ меню", callback_data="admin_menu")
+    )
+    return builder.as_markup()

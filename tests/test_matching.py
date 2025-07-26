@@ -5,6 +5,7 @@ import random
 from models import User, ParticipationStatus
 from matching import MatchingService, format_user_profile
 
+
 class TestMatchingService:
     """Тесты сервиса мэтчинга"""
 

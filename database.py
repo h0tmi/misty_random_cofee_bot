@@ -353,3 +353,100 @@ class Database:
         result = cursor.rowcount >= 0
         conn.close()
         return result
+
+    # Админские методы
+    async def get_all_users(self, limit: int = None, offset: int = 0) -> List[User]:
+        """Получить всех пользователей (с пагинацией)"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM users ORDER BY created_at DESC"
+        params = ()
+
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params = (limit, offset)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        users = []
+        for row in rows:
+            users.append(User(
+                user_id=row[0],
+                username=row[1],
+                first_name=row[2],
+                last_name=row[3],
+                bio=row[4],
+                interests=row[5],
+                participation_status=ParticipationStatus(row[6]),
+                is_active=bool(row[7]),
+                created_at=row[8]
+            ))
+
+        return users
+
+    async def get_users_count(self) -> int:
+        """Получить общее количество пользователей"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM users")
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        return count
+
+    async def get_matching_statistics(self) -> dict:
+        """Получить статистику мэтчинга"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Общее количество мэтчей
+        cursor.execute("SELECT COUNT(*) FROM matches")
+        total_matches = cursor.fetchone()[0]
+
+        # Количество мэтчей за последние 30 дней
+        cursor.execute("""
+            SELECT COUNT(*) FROM matches
+            WHERE created_at >= datetime('now', '-30 days')
+        """)
+        recent_matches = cursor.fetchone()[0]
+
+        # Количество пользователей по статусам участия
+        cursor.execute("""
+            SELECT participation_status, COUNT(*) FROM users
+            WHERE is_active = 1
+            GROUP BY participation_status
+        """)
+        participation_stats = dict(cursor.fetchall())
+
+        # Количество активных пользователей
+        cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 1")
+        active_users = cursor.fetchone()[0]
+
+        # Количество пользователей, ожидающих подтверждения
+        cursor.execute("SELECT COUNT(*) FROM pending_matches WHERE confirmed IS NULL")
+        pending_users = cursor.fetchone()[0]
+
+        # Количество подтвердивших участие
+        cursor.execute("SELECT COUNT(*) FROM pending_matches WHERE confirmed = 1")
+        confirmed_users = cursor.fetchone()[0]
+
+        conn.close()
+
+        return {
+            'total_matches': total_matches,
+            'recent_matches': recent_matches,
+            'participation_stats': participation_stats,
+            'active_users': active_users,
+            'pending_users': pending_users,
+            'confirmed_users': confirmed_users
+        }

@@ -9,7 +9,8 @@ from config import load_config
 from database import Database
 from keyboards import get_main_menu
 from scheduler import MatchingScheduler
-from handlers import profile, participation, matching
+from handlers import profile, participation, matching, admin
+import shared
 
 # Настройка логирования
 logging.basicConfig(
@@ -30,10 +31,13 @@ db = Database(config.database_path)
 # Создаем планировщик
 scheduler = MatchingScheduler(bot, db)
 
+
+
 # Регистрация роутеров
 dp.include_router(profile.router)
 dp.include_router(participation.router)
 dp.include_router(matching.router)
+dp.include_router(admin.router)
 
 @dp.message(CommandStart())
 async def start_command(message: Message):
@@ -84,28 +88,28 @@ async def menu_command(message: Message):
         reply_markup=get_main_menu()
     )
 
-# Админские команды
+# Админские команды (устаревшие, используйте /admin)
 @dp.message(Command("start_matching"))
 async def manual_start_matching(message: Message):
-    """Ручной запуск мэтчинга (только для админов)"""
+    """Ручной запуск мэтчинга (только для админов) - устаревшая команда"""
     if message.from_user.id not in config.admin_ids:
         await message.answer("❌ У вас нет прав для выполнения этой команды")
         return
 
-    await message.answer("🔄 Запускаю мэтчинг...")
-    await scheduler.manual_start_matching()
-    await message.answer("✅ Мэтчинг запущен!")
+    await message.answer(
+        "⚠️ Эта команда устарела. Используйте команду /admin для доступа к админской панели."
+    )
 
 @dp.message(Command("create_confirmed_matches"))
 async def manual_create_confirmed_matches(message: Message):
-    """Ручное создание подтвержденных пар (только для админов)"""
+    """Ручное создание подтвержденных пар (только для админов) - устаревшая команда"""
     if message.from_user.id not in config.admin_ids:
         await message.answer("❌ У вас нет прав для выполнения этой команды")
         return
 
-    await message.answer("🔄 Создаю пары из подтвердивших участие...")
-    await scheduler.manual_create_confirmed_matches()
-    await message.answer("✅ Пары созданы!")
+    await message.answer(
+        "⚠️ Эта команда устарела. Используйте команду /admin для доступа к админской панели."
+    )
 
 @dp.callback_query(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
@@ -129,6 +133,9 @@ async def main():
     try:
         # Инициализируем базу данных после запуска event loop
         await db.init_db()
+
+        # Устанавливаем глобальный планировщик для доступа из других модулей
+        shared.set_scheduler(scheduler)
 
         # Регистрируем middleware
         db_middleware = DatabaseMiddleware(db)

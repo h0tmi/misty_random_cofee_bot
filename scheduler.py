@@ -37,7 +37,7 @@ class MatchingScheduler:
         # self.scheduler.add_job(
         #     self.start_weekly_matching,
         #     'interval',
-        #     minutes=5,
+        #     minutes=1,
         #     id='test_matching'
         # )
 
