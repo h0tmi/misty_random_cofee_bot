@@ -38,7 +38,7 @@ class MatchingScheduler:
         # self.scheduler.add_job(
         #     self.start_weekly_matching,
         #     'interval',
-        #     minutes=1,
+        #     minutes=5,
         #     id='test_matching'
         # )
 
@@ -119,7 +119,7 @@ class MatchingScheduler:
             await self.bot.send_message(
                 chat_id=user.user_id,
                 text=profile_text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception as e:
             logger.error(f"Ошибка при отправке уведомления пользователю {user.user_id}: {e}")
@@ -132,7 +132,7 @@ class MatchingScheduler:
                 chat_id=user.user_id,
                 text=profile_text,
                 reply_markup=get_match_with_feedback_keyboard(partner.first_name, match_id),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception as e:
             logger.error(f"Ошибка при отправке уведомления пользователю {user.user_id}: {e}")

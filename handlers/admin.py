@@ -90,7 +90,7 @@ async def _show_users_page(callback: CallbackQuery, db, page: int = 0):
             await _show_users_page(callback, db, page=0)
             return
 
-        text = f"👥 **Список пользователей** (всего: {total_users})\n\n"
+        text = f"👥 <b>Список пользователей</b> (всего: {total_users})\n\n"
 
         if not users:
             text += "📭 Пользователей пока нет"
@@ -102,21 +102,32 @@ async def _show_users_page(callback: CallbackQuery, db, page: int = 0):
                     ParticipationStatus.NEVER: "❌"
                 }.get(user.participation_status, "❓")
 
-                username_text = f"@{user.username}" if user.username else "без username"
+                # Экранируем HTML символы для безопасности
+                from html import escape
+                first_name = escape(user.first_name or "")
+                last_name = escape(user.last_name or "")
+                username_text = (
+                    f"@{escape(user.username)}" if user.username
+                    else "без username"
+                )
                 active_text = "✅" if user.is_active else "❌"
 
+                created_date = (
+                    user.created_at[:10] if user.created_at else 'неизвестно'
+                )
+
                 text += (
-                    f"{i}. **{user.first_name}** "
-                    f"{user.last_name or ''}\n"
-                    f"   ID: `{user.user_id}` | {username_text}\n"
+                    f"{i}. <b>{first_name}</b> "
+                    f"{last_name}\n"
+                    f"   ID: <code>{user.user_id}</code> | {username_text}\n"
                     f"   Участие: {status_emoji} | Активен: {active_text}\n"
-                    f"   Создан: {user.created_at[:10] if user.created_at else 'неизвестно'}\n\n"
+                    f"   Создан: {created_date}\n\n"
                 )
 
         await callback.message.edit_text(
             text,
             reply_markup=get_users_list_keyboard(total_users, page, page_size),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
     except Exception as e:
@@ -157,17 +168,17 @@ async def admin_stats_callback(callback: CallbackQuery, db: Database):
             participation_text = "• Нет данных\n"
 
         text = (
-            "📊 **Статистика мэтчинга**\n\n"
+            "📊 <b>Статистика мэтчинга</b>\n\n"
 
-            "👥 **Пользователи:**\n"
+            "👥 <b>Пользователи:</b>\n"
             f"• Всего активных: {stats['active_users']}\n"
             f"• Ожидают подтверждения: {stats['pending_users']}\n"
             f"• Подтвердили участие: {stats['confirmed_users']}\n\n"
 
-            "🎯 **Статусы участия:**\n"
+            "🎯 <b>Статусы участия:</b>\n"
             f"{participation_text}\n"
 
-            "💫 **Мэтчи:**\n"
+            "💫 <b>Мэтчи:</b>\n"
             f"• Всего создано: {stats['total_matches']}\n"
             f"• За последние 30 дней: {stats['recent_matches']}\n\n"
 
@@ -177,7 +188,7 @@ async def admin_stats_callback(callback: CallbackQuery, db: Database):
         await callback.message.edit_text(
             text,
             reply_markup=get_back_to_admin(),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
     except Exception as e:

@@ -152,24 +152,34 @@ class MatchingService:
 
 def format_user_profile(user: User, match_id: int = None) -> str:
     """Форматировать анкету пользователя для отправки"""
+    from html import escape
+
     profile_text = f"👤 Ваша пара на эту неделю:\n\n"
-    profile_text += f"**{user.first_name}"
 
-    if user.last_name:
-        profile_text += f" {user.last_name}"
+    # Экранируем HTML символы для безопасности
+    first_name = escape(user.first_name or "")
+    last_name = escape(user.last_name or "")
+    username = escape(user.username or "")
+    bio = escape(user.bio or "")
+    interests = escape(user.interests or "")
 
-    if user.username:
-        profile_text += f"** (@{user.username})"
+    profile_text += f"<b>{first_name}"
+
+    if last_name:
+        profile_text += f" {last_name}"
+
+    if username:
+        profile_text += f"</b> (@{username})"
     else:
-        profile_text += "**"
+        profile_text += "</b>"
 
     profile_text += f"\n\n"
 
-    if user.bio:
-        profile_text += f"📝 О себе: {user.bio}\n\n"
+    if bio:
+        profile_text += f"📝 О себе: {bio}\n\n"
 
-    if user.interests:
-        profile_text += f"🎯 Интересы: {user.interests}\n\n"
+    if interests:
+        profile_text += f"🎯 Интересы: {interests}\n\n"
 
     profile_text += f"💬 Напишите друг другу и договоритесь о встрече!\n"
     profile_text += f"☕ Удачного знакомства!\n\n"
