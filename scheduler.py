@@ -5,8 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from database import Database
-from matching import MatchingService, format_user_profile
+from matching import MatchingService, format_user_profile, format_no_match_message
 from handlers.matching import get_participation_keyboard
+from keyboards import get_match_with_feedback_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -50,45 +51,66 @@ class MatchingScheduler:
         logger.info("Планировщик мэтчинга остановлен")
 
     async def start_weekly_matching(self):
-        """Начать еженедельный мэтчинг"""
+        """Начать еженедельный мэтчинг - фаза 1: сбор участников"""
         try:
-            logger.info("Начинаем еженедельный мэтчинг...")
+            logger.info("Начинаем еженедельный мэтчинг (фаза 1: сбор участников)...")
 
-            # Создаем автоматические пары и запросы на подтверждение
-            auto_matches = await self.matching_service.create_weekly_matches()
-
-            # Отправляем автоматические пары
-            for user1, user2 in auto_matches:
-                await self._send_match_notification(user1, user2)
-                await self._send_match_notification(user2, user1)
+            # Начинаем сессию матчинга с дедлайном 24 часа
+            session_id = await self.matching_service.start_weekly_matching_session(24)
 
             # Отправляем запросы на подтверждение участия
             pending_users = await self.matching_service.process_pending_confirmations()
             for user in pending_users:
                 await self._send_participation_request(user)
 
-            logger.info(f"Мэтчинг завершен. Автоматических пар: {len(auto_matches)}, "
-                       f"запросов на подтверждение: {len(pending_users)}")
+            logger.info(f"Сессия матчинга #{session_id} начата. "
+                       f"Запросов на подтверждение: {len(pending_users)}")
 
         except Exception as e:
-            logger.error(f"Ошибка при еженедельном мэтчинге: {e}")
+            logger.error(f"Ошибка при запуске сессии матчинга: {e}")
 
     async def create_confirmed_matches(self):
-        """Создать пары из подтвердивших участие пользователей"""
+        """Создать пары из всех участников - фаза 2: создание пар"""
         try:
-            logger.info("Создаем пары из подтвердивших участие...")
+            logger.info("Создаем пары из всех участников (фаза 2)...")
 
-            confirmed_matches = await self.matching_service.create_matches_from_confirmed_participants()
+            # Проверяем, есть ли активная сессия матчинга
+            session = await self.db.get_current_matching_session()
+            if not session or session['status'] != 'collecting':
+                logger.warning("Нет активной сессии сбора участников")
+                return
 
-            # Отправляем уведомления о парах
-            for user1, user2 in confirmed_matches:
-                await self._send_match_notification(user1, user2)
-                await self._send_match_notification(user2, user1)
+            # Переводим сессию в статус создания пар
+            await self.db.update_matching_session_status(session['id'], 'pairing')
 
-            logger.info(f"Создано {len(confirmed_matches)} пар из подтвердивших участие")
+            # Создаем пары из всех участников
+            matching_result = await self.matching_service.create_weekly_matches()
+
+            # Отправляем уведомления о парах с кнопками обратной связи
+            for user1, user2 in matching_result.matches:
+                # Получаем ID матча для обратной связи
+                recent_matches = await self.db.get_user_recent_matches(user1.user_id, 1)
+                match_id = recent_matches[0]['match_id'] if recent_matches else None
+
+                await self._send_match_notification_with_feedback(user1, user2, match_id)
+                await self._send_match_notification_with_feedback(user2, user1, match_id)
+
+            # Отправляем уведомления пользователям без пары
+            for user in matching_result.unmatched_users:
+                await self._send_no_match_notification(user)
+
+            # Отправляем уведомления пользователям с недавними матчами
+            for user in matching_result.users_with_recent_matches:
+                await self._send_no_match_notification(user)
+
+            # Завершаем сессию матчинга
+            await self.db.update_matching_session_status(session['id'], 'completed')
+
+            logger.info(f"Создано {len(matching_result.matches)} пар из всех участников, "
+                       f"пользователей без пары: {len(matching_result.unmatched_users)}")
 
         except Exception as e:
-            logger.error(f"Ошибка при создании подтвержденных пар: {e}")
+            logger.error(f"Ошибка при создании пар: {e}")
 
     async def _send_match_notification(self, user: object, partner: object):
         """Отправить уведомление о паре"""
@@ -101,6 +123,30 @@ class MatchingScheduler:
             )
         except Exception as e:
             logger.error(f"Ошибка при отправке уведомления пользователю {user.user_id}: {e}")
+
+    async def _send_match_notification_with_feedback(self, user: object, partner: object, match_id: int):
+        """Отправить уведомление о паре с кнопками обратной связи"""
+        try:
+            profile_text = format_user_profile(partner, match_id)
+            await self.bot.send_message(
+                chat_id=user.user_id,
+                text=profile_text,
+                reply_markup=get_match_with_feedback_keyboard(partner.first_name, match_id),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления пользователю {user.user_id}: {e}")
+
+    async def _send_no_match_notification(self, user: object):
+        """Отправить уведомление о том, что пара не найдена"""
+        try:
+            no_match_text = format_no_match_message(user)
+            await self.bot.send_message(
+                chat_id=user.user_id,
+                text=no_match_text
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления об отсутствии пары пользователю {user.user_id}: {e}")
 
     async def _send_participation_request(self, user: object):
         """Отправить запрос на участие в мэтчинге"""

@@ -38,6 +38,7 @@ class Database:
                 user2_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_completed BOOLEAN DEFAULT 0,
+                meeting_feedback TEXT DEFAULT NULL,
                 FOREIGN KEY (user1_id) REFERENCES users (user_id),
                 FOREIGN KEY (user2_id) REFERENCES users (user_id)
             )
@@ -50,6 +51,18 @@ class Database:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 confirmed BOOLEAN DEFAULT NULL,
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        """)
+
+        # Таблица для отслеживания сессий матчинга
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS matching_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT DEFAULT 'collecting',
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deadline TIMESTAMP,
+                completed_at TIMESTAMP DEFAULT NULL,
+                forced_completion BOOLEAN DEFAULT 0
             )
         """)
 
@@ -450,3 +463,158 @@ class Database:
             'pending_users': pending_users,
             'confirmed_users': confirmed_users
         }
+
+    # Методы для работы с обратной связью о встречах
+    async def record_meeting_feedback(self, match_id: int, user_id: int, feedback: str) -> bool:
+        """Записать обратную связь о встрече"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Проверяем, что пользователь участвует в этом матче
+        cursor.execute("""
+            SELECT id FROM matches
+            WHERE id = ? AND (user1_id = ? OR user2_id = ?)
+        """, (match_id, user_id, user_id))
+
+        match = cursor.fetchone()
+        if not match:
+            conn.close()
+            return False
+
+        # Записываем обратную связь
+        cursor.execute("""
+            UPDATE matches
+            SET meeting_feedback = ?
+            WHERE id = ?
+        """, (feedback, match_id))
+
+        conn.commit()
+        result = cursor.rowcount > 0
+        conn.close()
+        return result
+
+    async def get_user_recent_matches(self, user_id: int, days: int = 7) -> List[dict]:
+        """Получить недавние матчи пользователя для отправки обратной связи"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        date_threshold = datetime.now() - timedelta(days=days)
+
+        cursor.execute("""
+            SELECT m.id, m.user1_id, m.user2_id, m.created_at, m.meeting_feedback,
+                   u1.first_name as user1_name, u1.last_name as user1_lastname,
+                   u2.first_name as user2_name, u2.last_name as user2_lastname
+            FROM matches m
+            JOIN users u1 ON m.user1_id = u1.user_id
+            JOIN users u2 ON m.user2_id = u2.user_id
+            WHERE (m.user1_id = ? OR m.user2_id = ?)
+            AND m.created_at >= ?
+            AND m.meeting_feedback IS NULL
+            ORDER BY m.created_at DESC
+        """, (user_id, user_id, date_threshold.isoformat()))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        matches = []
+        for row in rows:
+            partner_name = (
+                f"{row[5]} {row[6] or ''}".strip() if user_id == row[2]
+                else f"{row[7]} {row[8] or ''}".strip()
+            )
+            matches.append({
+                'match_id': row[0],
+                'partner_name': partner_name,
+                'created_at': row[3],
+                'feedback': row[4]
+            })
+
+        return matches
+
+    # Методы для работы с сессиями матчинга
+    async def create_matching_session(self, deadline_hours: int = 24) -> int:
+        """Создать новую сессию матчинга"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        deadline = datetime.now() + timedelta(hours=deadline_hours)
+
+        cursor.execute("""
+            INSERT INTO matching_sessions (deadline)
+            VALUES (?)
+        """, (deadline.isoformat(),))
+
+        session_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return session_id
+
+    async def get_current_matching_session(self) -> Optional[dict]:
+        """Получить текущую активную сессию матчинга"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, status, started_at, deadline, completed_at, forced_completion
+            FROM matching_sessions
+            WHERE status IN ('collecting', 'pairing')
+            ORDER BY started_at DESC
+            LIMIT 1
+        """)
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return {
+                'id': row[0],
+                'status': row[1],
+                'started_at': row[2],
+                'deadline': row[3],
+                'completed_at': row[4],
+                'forced_completion': bool(row[5])
+            }
+        return None
+
+    async def update_matching_session_status(self, session_id: int, status: str, forced: bool = False) -> bool:
+        """Обновить статус сессии матчинга"""
+        await self._ensure_initialized()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        if status == 'completed':
+            cursor.execute("""
+                UPDATE matching_sessions
+                SET status = ?, completed_at = CURRENT_TIMESTAMP, forced_completion = ?
+                WHERE id = ?
+            """, (status, forced, session_id))
+        else:
+            cursor.execute("""
+                UPDATE matching_sessions
+                SET status = ?
+                WHERE id = ?
+            """, (status, session_id))
+
+        conn.commit()
+        result = cursor.rowcount > 0
+        conn.close()
+        return result
+
+    async def force_complete_matching_session(self) -> bool:
+        """Принудительно завершить текущую сессию матчинга"""
+        session = await self.get_current_matching_session()
+        if not session:
+            return False
+
+        return await self.update_matching_session_status(
+            session['id'], 'completed', forced=True
+        )

@@ -23,13 +23,15 @@ class TestMatchingService:
         for user in users:
             await temp_db.create_or_update_user(user)
 
-        matches = await matching_service._create_matches_from_users(users)
+        result = await matching_service._create_matches_from_users(users)
 
-        assert len(matches) == 2  # 4 пользователя = 2 пары
+        assert len(result.matches) == 2  # 4 пользователя = 2 пары
+        assert len(result.unmatched_users) == 0  # Все должны быть сматчены
+        assert len(result.users_with_recent_matches) == 0  # Нет недавних матчей
 
         # Проверяем, что все пользователи использованы
         matched_users = set()
-        for user1, user2 in matches:
+        for user1, user2 in result.matches:
             matched_users.add(user1.user_id)
             matched_users.add(user2.user_id)
 

@@ -4,12 +4,14 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
 
 from config import load_config
 from database import Database
 from keyboards import get_main_menu
 from scheduler import MatchingScheduler
-from handlers import profile, participation, matching, admin
+from handlers import profile, participation, matching, admin, feedback
+from handlers.profile import force_create_profile
 import shared
 
 # Настройка логирования
@@ -32,19 +34,30 @@ db = Database(config.database_path)
 scheduler = MatchingScheduler(bot, db)
 
 
-
 # Регистрация роутеров
 dp.include_router(profile.router)
 dp.include_router(participation.router)
 dp.include_router(matching.router)
 dp.include_router(admin.router)
+dp.include_router(feedback.router)
+
 
 @dp.message(CommandStart())
-async def start_command(message: Message):
+async def start_command(message: Message, db: Database, state: FSMContext):
     """Обработчик команды /start"""
+    # Проверяем, есть ли пользователь в базе данных
+    user = await db.get_user(message.from_user.id)
+
+    if user is None:
+        # Новый пользователь - принудительно отправляем в создание анкеты
+        await force_create_profile(message, state)
+        return
+
+    # Существующий пользователь - показываем обычное приветствие
     await message.answer(
         f"👋 Привет, {message.from_user.first_name}!\n\n"
-        f"Я бот для Random Coffee - помогаю людям знакомиться и общаться за чашкой кофе ☕\n\n"
+        f"Я бот для Random Coffee - помогаю людям знакомиться "
+        f"и общаться за чашкой кофе ☕\n\n"
         f"Что я умею:\n"
         f"• Создавать и управлять анкетами\n"
         f"• Подбирать пары для встреч каждую неделю\n"
@@ -53,6 +66,7 @@ async def start_command(message: Message):
         f"Выберите действие:",
         reply_markup=get_main_menu()
     )
+
 
 @dp.message(Command("help"))
 async def help_command(message: Message):
@@ -80,6 +94,7 @@ async def help_command(message: Message):
     """
     await message.answer(help_text)
 
+
 @dp.message(Command("menu"))
 async def menu_command(message: Message):
     """Обработчик команды /menu"""
@@ -88,28 +103,37 @@ async def menu_command(message: Message):
         reply_markup=get_main_menu()
     )
 
+
 # Админские команды (устаревшие, используйте /admin)
 @dp.message(Command("start_matching"))
 async def manual_start_matching(message: Message):
     """Ручной запуск мэтчинга (только для админов) - устаревшая команда"""
     if message.from_user.id not in config.admin_ids:
-        await message.answer("❌ У вас нет прав для выполнения этой команды")
+        await message.answer(
+            "❌ У вас нет прав для выполнения этой команды"
+        )
         return
 
     await message.answer(
-        "⚠️ Эта команда устарела. Используйте команду /admin для доступа к админской панели."
+        "⚠️ Эта команда устарела. Используйте команду /admin "
+        "для доступа к админской панели."
     )
+
 
 @dp.message(Command("create_confirmed_matches"))
 async def manual_create_confirmed_matches(message: Message):
-    """Ручное создание подтвержденных пар (только для админов) - устаревшая команда"""
+    """Ручное создание пар (только для админов) - устаревшая команда"""
     if message.from_user.id not in config.admin_ids:
-        await message.answer("❌ У вас нет прав для выполнения этой команды")
+        await message.answer(
+            "❌ У вас нет прав для выполнения этой команды"
+        )
         return
 
     await message.answer(
-        "⚠️ Эта команда устарела. Используйте команду /admin для доступа к админской панели."
+        "⚠️ Эта команда устарела. Используйте команду /admin "
+        "для доступа к админской панели."
     )
+
 
 @dp.callback_query(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
@@ -119,6 +143,7 @@ async def main_menu_callback(callback: CallbackQuery):
         reply_markup=get_main_menu()
     )
 
+
 # Middleware для передачи database в хендлеры
 class DatabaseMiddleware:
     def __init__(self, database: Database):
@@ -127,6 +152,7 @@ class DatabaseMiddleware:
     async def __call__(self, handler, event, data):
         data['db'] = self.database
         return await handler(event, data)
+
 
 async def main():
     """Запуск бота"""

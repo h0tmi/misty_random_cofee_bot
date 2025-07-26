@@ -8,7 +8,8 @@ from config import load_config
 from keyboards import (
     get_admin_menu,
     get_users_list_keyboard,
-    get_back_to_admin
+    get_back_to_admin,
+    get_force_complete_confirmation
 )
 from models import ParticipationStatus
 from database import Database
@@ -229,4 +230,89 @@ async def admin_manual_matching_callback(callback: CallbackQuery):
 @router.callback_query(F.data == "current_page")
 async def current_page_callback(callback: CallbackQuery):
     """Обработчик нажатия на текущую страницу (ничего не делаем)"""
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_force_complete")
+async def admin_force_complete_callback(callback: CallbackQuery, db: Database):
+    """Обработчик принудительного завершения матчинга"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    # Проверяем, есть ли активная сессия матчинга
+    session = await db.get_current_matching_session()
+
+    if not session:
+        await callback.message.edit_text(
+            "❌ Нет активной сессии матчинга для завершения.",
+            reply_markup=get_back_to_admin()
+        )
+        await callback.answer()
+        return
+
+    if session['status'] == 'collecting':
+        await callback.message.edit_text(
+            f"⚠️ Принудительное завершение матчинга\n\n"
+            f"Текущий статус: Сбор участников\n"
+            f"Дедлайн: {session['deadline'][:16]}\n\n"
+            f"Вы уверены, что хотите завершить матчинг принудительно? "
+            f"Это создаст пары из уже подтвердивших участие пользователей.",
+            reply_markup=get_force_complete_confirmation()
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ Сессия матчинга уже в процессе создания пар или завершена.\n"
+            f"Статус: {session['status']}",
+            reply_markup=get_back_to_admin()
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "confirm_force_complete")
+async def confirm_force_complete_callback(
+    callback: CallbackQuery, db: Database
+):
+    """Подтверждение принудительного завершения матчинга"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    try:
+        # Завершаем сессию принудительно
+        success = await db.force_complete_matching_session()
+
+        if success:
+            # Получаем планировщик и запускаем создание пар
+            import shared
+            scheduler = shared.get_scheduler()
+            if scheduler:
+                await scheduler.manual_create_confirmed_matches()
+
+                await callback.message.edit_text(
+                    "✅ Матчинг завершен принудительно!\n\n"
+                    "Пары созданы из участников, которые успели "
+                    "подтвердить свое участие.",
+                    reply_markup=get_back_to_admin()
+                )
+            else:
+                await callback.message.edit_text(
+                    "❌ Планировщик недоступен.",
+                    reply_markup=get_back_to_admin()
+                )
+        else:
+            await callback.message.edit_text(
+                "❌ Не удалось завершить матчинг. "
+                "Возможно, нет активной сессии.",
+                reply_markup=get_back_to_admin()
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка при принудительном завершении матчинга: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка при завершении матчинга: {str(e)}",
+            reply_markup=get_back_to_admin()
+        )
+
     await callback.answer()
